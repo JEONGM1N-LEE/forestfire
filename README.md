@@ -1,9 +1,584 @@
+> 수성인재교육 실무형 AI/SW 인재 육성 Lab 팀 프로젝트
 # FORESTFIRE ATLAS KOREA
 
-South Korea Wildfire Atlas — 시군구 산불 위험 지도·예측 웹서비스.
+전국 시군구 단위의 산불 발생 가능성을 예측하고 지도 기반으로 결과를 제공하는 AI 웹서비스
 
-지도·당일/시나리오 예측에 더해 **회원 로그인**(로컬 아이디 + 구글/카카오 OAuth), **Gemini 안내 챗봇**, **지역별 PDF 보고서**(회원 전용)를 제공합니다.  
-화면에 보이는 당일·시나리오 값은 XGBoost `predict_proba` raw 확률(`ml_risk`)을 ×100 한 **산불위험지수 (0~100)** 입니다.
+산불 이력과 기상 데이터를 활용해 XGBoost 기반으로 산불 발생 가능성을 예측하고,
+Next.js · Express · Flask로 구성된 웹서비스를 통해 예측 결과를 사용자에게 제공합니다.
+화면에 보이는 당일·시나리오 위험도 값은 XGBoost `predict_proba` raw 확률(`ml_risk`)을 ×100 한 **산불위험지수 (0~100)** 입니다.
+
+## 프로젝트 개요
+
+산불은 기상 조건과 과거 산불 발생 이력 등 여러 요인의 영향을 받기 때문에
+지역별 데이터를 활용한 산불 발생 가능성 예측이 필요합니다.
+
+FORESTFIRE ATLAS KOREA는 시군구 단위의 산불 이력과 기상 데이터를 기반으로
+일별 산불 발생 가능성을 예측하고, 이를 지도와 웹 화면에서 확인할 수 있도록 구현한 서비스입니다.
+
+단순히 머신러닝 모델의 예측 결과를 제공하는 것에 그치지 않고,
+ML 모델을 별도의 Flask 서비스로 분리하고 Express와 Next.js를 통해
+사용자 화면까지 연결하는 구조로 구성했습니다.
+
+
+## 주요 기능
+
+- 전국 시군구 단위 산불 위험 지도
+- 일별(실시간) 산불 발생 가능성 예측
+- 사용자 지정 기상 조건을 활용한 시나리오 예측
+- 과거 산불 발생 이력 조회
+- 지역 및 산 통합 검색
+- 기상 정보 조회
+- Gemini 기반 산불 안내 챗봇
+- Google / Kakao OAuth 및 로컬 로그인
+- 지역별 PDF 리포트 생성 및 다운로드
+- 산불 이력 데이터 갱신
+
+
+## Tech Stack
+
+| 영역 | 기술 | 활용 |
+|---|---|---|
+| Frontend | Next.js, React, TypeScript | 사용자 화면 및 API 연동 |
+| Backend | Express, TypeScript | REST API, 인증/세션, 서비스 로직 |
+| ML Service | Python, Flask | 머신러닝 모델 예측 API |
+| Machine Learning | XGBoost | 산불 발생 가능성 예측 |
+| Data | Python, Pandas | 데이터 처리 및 피처 구성 |
+| Database | MariaDB | 산불·기상·회원·예측 데이터 관리 |
+| AI | Gemini API | 산불 안내 챗봇 |
+| PDF | Jinja2, Playwright | 지역별 PDF 리포트 생성 |
+| Deployment | Docker | 프론트엔드 컨테이너 실행 |
+| Development | Git, GitHub, Cursor | 버전 관리 및 개발 |
+
+
+## 시스템 아키텍처
+
+프로젝트는 Frontend, Backend, ML Service를 분리하고,
+GitHub Actions를 활용한 데이터 적재 및 모델 운영 흐름을 구성했습니다.
+
+```text
+                         ┌──────────────────────┐
+                         │    External Data     │
+                         │                      │
+                         │ 산불 / 기상 데이터  │
+                         └──────────┬───────────┘
+                                    │
+                                    ▼
+                         ┌──────────────────────┐
+                         │    GitHub Actions    │
+                         │                      │
+                         │ 데이터 수집·적재 자동화 │
+                         └──────────┬───────────┘
+                                    │
+                                    ▼
+                         ┌──────────────────────┐
+                         │       MariaDB        │
+                         │                      │
+                         │ 산불 이력 / 기상 데이터 │
+                         └───────┬────────┬─────┘
+                                 │        │
+                         학습 데이터│        │서비스 데이터
+                                 │        │
+                                 ▼        ▼
+                    ┌────────────────┐   ┌──────────────────┐
+                    │      ETL       │   │    Express       │
+                    │                │   │   Backend :4000  │
+                    │ 전처리·피처 구성 │   │                  │
+                    └───────┬────────┘   │ API / 회원 / DB  │
+                            │              │ Gemini / Proxy   │
+                            ▼              └────────┬─────────┘
+                    ┌────────────────┐              │
+                    │  XGBoost Model │              │
+                    │                │              │
+                    │    모델 학습   │              │
+                    └───────┬────────┘              │
+                            │                       │
+                            ▼                       │
+                    ┌────────────────┐              │
+                    │  Flask         │◄─────────────┘
+                    │  ML Service    │
+                    │   :5000        │
+                    │                │
+                    │ 모델 예측 / PDF │
+                    └────────────────┘
+                            ▲
+                            │
+                    ┌───────┴────────┐
+                    │    Next.js     │
+                    │   Frontend     │
+                    │     :3000      │
+                    └───────▲────────┘
+                            │
+                            │
+                    ┌───────┴────────┐
+                    │    Browser     │
+                    └────────────────┘
+
+
+서비스 요청은
+
+`Browser → Next.js → Express → Flask`
+
+순으로 전달되며, Express는 회원/세션 관리와 데이터 처리 및 외부 서비스 연동을 담당하고 Flask는 머신러닝 예측을 담당하도록 역할을 분리했습니다.
+
+데이터 수집 및 적재는 GitHub Actions를 통해 자동화하고, 적재된 데이터는 MariaDB에 저장합니다. 이후 저장된 데이터를 기반으로 데이터 전처리 및 피처 구성을 수행하고 XGBoost 모델 학습에 활용합니다.
+
+
+## My Role
+
+팀 프로젝트에서 데이터 및 머신러닝 영역을 중심으로 참여했습니다.
+
+### 머신러닝
+
+- 팀에서 수집·전처리한 산불 및 기상 데이터를 기반으로 피처 구성
+- XGBoost 모델 학습
+- 모델 평가
+- 산불 발생 가능성 예측 로직 구현
+- 학습된 모델의 예측 결과가 서비스에서 활용되는 흐름 확인
+
+### 서비스 연결 및 배포
+
+- ML Service의 예측 구조와 API 흐름 분석
+- 프론트엔드에서 예측 결과가 사용자 화면까지 전달되는 전체 흐름 확인
+- 프론트엔드 배포 참여
+- 데이터 → 머신러닝 모델 → API → 웹 화면으로 이어지는 서비스 구조 이해
+
+프로젝트 진행 과정에서 개별 모델 구현에 그치지 않고,
+실제 웹서비스에서 머신러닝 결과가 어떻게 활용되는지 이해하는 데 중점을 두었습니다.
+
+
+## 머신러닝 모델
+
+### 예측 대상
+
+시군구 × 일 단위의 산불 발생 가능성을 XGBoost로 예측합니다.
+
+웹서비스에서는 XGBoost의 `predict_proba`에서 얻은 raw 확률값을
+100배하여 0~100 범위의 산불위험지수로 표시합니다.
+
+```text
+XGBoost predict_proba
+        ↓
+    raw probability
+        ↓
+      × 100
+        ↓
+산불위험지수 (0~100)
+
+### 사용 피처
+
+현재 모델에서는 다음 10개 피처를 사용합니다.
+
+``` text
+temp_avg
+precip
+wind_avg
+humidity_avg
+hist_fire_rate
+hist_fire_count_365
+dwi
+precip_sum_7d
+precip_sum_14d
+dry_days
+```
+
+기상 조건뿐만 아니라 과거 산불 발생 이력과 최근 강수량, 건조 일수 등의
+정보를 함께 활용하도록 구성했습니다.
+
+### 학습 및 추론 구조
+
+  단계            위치
+  --------------- --------------------------------
+  데이터 전처리   `etl/`
+  모델 학습       `etl/ml/train_wildfire_xgb.py`
+  모델 저장       `ml-service/models/`
+  예측            `ml-service/predict/daily.py`
+  Flask API       `ml-service/routes/`
+
+학습된 XGBoost 모델은 `ml-service`에서 로드하여 예측에 사용합니다.
+
+## 데이터 구성
+
+### 산불 이력 데이터
+
+MariaDB의 `forestfire_stats`를 주요 데이터 소스로 사용합니다.
+
+``` text
+MariaDB
+forestfire_stats
+       │
+       ├── 산불 이력 조회
+       ├── 모델 학습
+       └── 지도 데이터 갱신
+```
+
+DB 사용이 어려운 경우 일부 데이터는 CSV를 활용할 수 있도록 fallback
+구조를 구성했습니다.
+
+### 기상 데이터
+
+기상청 ASOS API를 활용하여 당일 기상 데이터를 가져오고, MariaDB에 저장된
+시군구별 과거 기상 데이터를 활용하여 예측에 필요한 lag 및 통계 피처를
+구성합니다.
+
+주요 데이터는 다음과 같습니다.
+
+-   평균 기온
+-   강수량
+-   평균 풍속
+-   평균 상대습도
+-   최근 강수량
+-   건조 일수
+
+### 데이터 흐름
+
+``` text
+산불 이력 ─────┐
+               │
+               ▼
+          데이터 처리
+               │
+기상 데이터 ───┤
+               ▼
+         Feature Construction
+               │
+               ▼
+        XGBoost Model
+               │
+               ▼
+       산불 발생 가능성
+               │
+               ▼
+         Flask API
+               │
+               ▼
+       Express Backend
+               │
+               ▼
+         Next.js UI
+```
+
+## 주요 서비스 구조
+
+### Frontend
+
+`frontend/`
+
+Next.js와 TypeScript를 기반으로 사용자 화면을 구성합니다.
+
+주요 역할:
+
+-   산불 위험 지도
+-   지역 및 산 검색
+-   산불 예측 결과 표시
+-   시나리오 예측
+-   기상 정보 표시
+-   로그인 UI
+-   챗봇 UI
+-   PDF 리포트 UI
+
+Next.js Route Handler를 통해 Express Backend와 통신하도록 구성했습니다.
+
+### Backend
+
+`backend/`
+
+Express와 TypeScript를 기반으로 API와 서비스 로직을 담당합니다.
+
+주요 역할:
+
+-   REST API
+-   회원가입 및 로그인
+-   세션 관리
+-   Google / Kakao OAuth
+-   Flask ML Service 연동
+-   Gemini 챗봇 연동
+-   산불 이력 데이터 갱신
+-   예측 데이터 관리
+-   PDF 리포트 요청 처리
+
+### ML Service
+
+`ml-service/`
+
+Flask 기반의 머신러닝 서비스입니다.
+
+주요 역할:
+
+-   XGBoost 모델 로딩
+-   일별 산불 예측
+-   시나리오 예측
+-   예측 결과 반환
+-   PDF 리포트 생성 지원
+-   예측 결과 DB 저장
+
+머신러닝 영역을 웹 Backend와 별도의 서비스로 분리하여 모델과 웹
+애플리케이션의 역할을 구분했습니다.
+
+### ETL
+
+`etl/`
+
+웹서비스 요청과 분리된 오프라인 데이터 처리 영역입니다.
+
+주요 역할:
+
+-   산불 데이터 전처리
+-   기상 데이터 전처리
+-   데이터 분석
+-   지도 데이터 생성
+-   산 정보 수집
+-   지역명 lookup 생성
+-   머신러닝 모델 학습
+
+주요 실행 파일:
+
+``` text
+etl/pipeline/preprocess.py
+etl/pipeline/preprocess_weather.py
+etl/pipeline/load_korea_mountains.py
+etl/pipeline/build_legal_dong_lookup.py
+etl/analyze/analyze_wildfire_mountain_events.py
+etl/map/build_admin_layers.py
+etl/map/export_map_data.py
+etl/pipeline/fetch_mountain_images.py
+etl/map/compress_web_data.py
+etl/ml/train_wildfire_xgb.py
+```
+
+## 폴더 구조
+
+``` text
+ForestFire/
+│
+├── frontend/
+│   ├── public/data/
+│   └── src/
+│       ├── app/
+│       ├── components/
+│       ├── lib/
+│       └── app/api/[...path]/
+│
+├── backend/
+│   ├── data/
+│   ├── migrations/
+│   └── src/
+│
+├── ml-service/
+│   ├── models/
+│   ├── reference/
+│   ├── predict/
+│   ├── report/
+│   └── routes/
+│
+├── etl/
+│   ├── pipeline/
+│   ├── analyze/
+│   ├── map/
+│   └── ml/
+│
+├── db/
+├── db-archive/
+├── .gitignore
+└── README.md
+```
+
+`db/`와 `db-archive/`는 로컬에서 사용하는 대용량 데이터 및 ETL·분석
+원본/중간 산출물을 관리하는 영역이며 Git에서는 제외합니다.
+
+## 주요 API
+
+### Express API
+
+#### 지도 · 예측
+
+``` text
+GET  /api/health
+GET  /api/map/data
+GET  /api/map/admin/:level
+
+POST /api/predict/daily
+GET  /api/predict/scenario/baseline
+POST /api/predict/scenario
+
+POST /api/wildfires/sync
+GET  /api/wildfires/sync/status
+```
+
+#### 회원
+
+``` text
+POST /api/auth/register
+POST /api/auth/login
+POST /api/auth/extend
+POST /api/auth/logout
+
+GET  /api/auth/me
+
+GET  /api/auth/google
+GET  /api/auth/kakao
+GET  /api/auth/google/callback
+GET  /api/auth/kakao/callback
+```
+
+#### 챗봇 · 리포트
+
+``` text
+POST /api/chat
+GET  /api/chat/history
+
+GET  /api/report/daily
+POST /api/report/pdf
+GET  /api/report/download/:id
+```
+
+### Flask API
+
+Flask API는 Express Backend에서 호출하는 내부 서비스로 사용합니다.
+
+``` text
+GET  /health
+
+POST /predict/daily
+
+GET  /predict/scenario/baseline
+POST /predict/scenario
+
+POST /report/pdf
+```
+
+## AI 챗봇
+
+Gemini API를 활용하여 산불 예측 결과와 지역 정보를 기반으로 사용자의
+질문에 답변하는 안내 챗봇을 구현했습니다.
+
+챗봇은 Express Backend에서 처리하며, 당일 예측 API 결과를 우선 사용하고
+필요한 경우 저장된 예측 데이터를 fallback으로 활용합니다.
+
+회원 사용자의 경우 이전 대화 내역을 저장하고 다시 불러올 수 있도록
+구성했습니다.
+
+## PDF 리포트
+
+로그인한 사용자는 산불 예측 결과를 기반으로 지역별 PDF 리포트를 생성할
+수 있습니다.
+
+``` text
+사용자
+  ↓
+Express
+  ↓
+회원 세션 확인
+  ↓
+Flask ML Service
+  ↓
+Jinja2 + Playwright
+  ↓
+A4 PDF 생성
+  ↓
+다운로드
+```
+
+생성된 PDF는 DB에 장기간 저장하지 않고 메모리에 임시 보관한 후 제한된
+시간 동안 다운로드할 수 있도록 구성했습니다.
+
+## 실행 방법
+
+이 프로젝트는 Frontend, Backend, ML Service의 세 프로세스를 순서대로
+실행하는 구조입니다.
+
+### 1. Flask ML Service
+
+``` powershell
+cd ml-service
+
+pip install -r requirements.txt
+
+# PDF 리포트 기능 사용 시 최초 1회
+playwright install chromium
+
+python app.py
+```
+
+기본적으로 `5000` 포트를 사용합니다.
+
+### 2. Express Backend
+
+``` powershell
+cd backend
+
+npm install
+npm run dev
+```
+
+기본적으로 `4000` 포트를 사용합니다.
+
+### 3. Next.js Frontend
+
+``` powershell
+cd frontend
+
+npm install
+npm run dev
+```
+
+기본적으로 `3000` 포트를 사용합니다.
+
+브라우저에서 다음 주소로 접속합니다.
+
+``` text
+http://localhost:3000
+```
+
+## 환경변수
+
+실행에 필요한 API Key, DB 인증정보 및 OAuth Secret 등은 환경변수로
+관리합니다.
+
+주요 환경변수:
+
+``` text
+KMA_API_AUTH_KEY
+
+DB_HOST
+DB_PORT
+DB_USER
+DB_PASSWORD
+DB_NAME
+
+ML_HOST
+ML_PORT
+ML_SERVICE_URL
+
+GEMINI_API_KEY
+
+SESSION_SECRET
+
+GOOGLE_CLIENT_ID
+GOOGLE_CLIENT_SECRET
+
+KAKAO_REST_API_KEY
+KAKAO_CLIENT_SECRET
+
+NEXT_PUBLIC_KAKAO_MAP_KEY
+EXPRESS_URL
+```
+
+실제 인증정보 및 API Key는 Repository에 포함하지 않습니다.
+
+## Docker
+
+Frontend는 Next.js의 standalone output을 활용하여 Docker 환경에서도
+실행할 수 있도록 구성했습니다.
+
+``` powershell
+cd frontend
+
+docker compose --env-file .env.local up -d --build
+```
+
+Frontend 컨테이너는 3000 포트를 사용하며, Express와 Flask는 별도의
+프로세스로 실행합니다.
+
 
 ## 주요 화면
 
@@ -34,7 +609,7 @@ South Korea Wildfire Atlas — 시군구 산불 위험 지도·예측 웹서비�
 **PDF 보고서:** 회원 세션 확인(Express) → `ml-service` Jinja2+Playwright로 **A4 가로** PDF 생성 → 메모리에 임시 보관(TTL 30분) 후 다운로드 URL 발급.  
 표지(발행일·작성·닉네임 + 요약·게이지) 뒤 본문. 전국 리포트는 시군구 순위를 **상위 10·하위 5**만 넣고, 특정 지역 리포트는 해당 범위를 유지합니다.
 
-## 데이터 소스 (현재)
+## 데이터 소스
 
 | 용도 | 우선 소스 | 비고 |
 |------|-----------|------|
@@ -46,8 +621,6 @@ South Korea Wildfire Atlas — 시군구 산불 위험 지도·예측 웹서비�
 | 챗봇·리포트용 당일 예측 스냅샷 | `backend/data/daily_ml_risk.json` | Express가 예측 API 성공 시 저장. Flask는 같은 결과를 MariaDB `daily_ml_risk_runs` / `daily_ml_risk_regions`에도 적재. 챗봇은 예측 API 우선, 실패 시 파일 폴백 |
 | 산 썸네일 | `frontend/public/data/mountain-images/` | 오프라인 `etl/pipeline/fetch_mountain_images.py` (산림청 산정보 OpenAPI). 런타임에 API를 치지 않음 |
 | 지역명 정규화 | `legal-dong-lookup.json` | UI는 `frontend/public/data`. Express는 `backend/data` → frontend 경로 폴백 |
-
-`refined_wildfire_data.csv` 는 더 이상 주 데이터가 아닙니다. DB가 정상이면 없어도 일상 운영(예측·이력 갱신·학습)이 가능합니다.
 
 회원/비회원은 **로그인 세션 유무**로만 구분합니다. 구독·결제 테이블은 사용하지 않습니다.  
 로그인은 로컬(아이디/비밀번호) + 구글/카카오 OAuth를 지원하며, 유휴 30분 후 자동 로그아웃됩니다(연장 가능).
@@ -298,3 +871,32 @@ cd ml-service; python -m predict.daily --kma
 
 경로 상수는 `etl/paths.py` 한곳에서 관리합니다.  
 산불 원본 로드는 `etl/pipeline/load_wildfire_history.py` (DB 우선)를 공통으로 씁니다.
+
+## 프로젝트를 통해 배운 점
+
+이번 프로젝트에서는 머신러닝 모델을 만드는 것뿐만 아니라 모델의 결과가
+실제 웹서비스의 기능으로 연결되는 전체 흐름을 경험했습니다.
+
+특히 데이터와 모델을 구현한 뒤에는
+
+``` text
+Data
+ ↓
+Feature
+ ↓
+Model
+ ↓
+ML Service
+ ↓
+Backend API
+ ↓
+Frontend
+ ↓
+User
+```
+
+와 같이 각 영역이 연결되어야 실제 서비스가 완성된다는 점을 배웠습니다.
+
+또한 프로젝트 진행 과정에서 AI 개발 도구를 활용하면서 생성된 코드의
+동작을 그대로 사용하는 것보다 API 호출 구조와 데이터 흐름을 직접
+확인하고 코드의 역할을 이해하는 것이 중요하다는 점을 경험했습니다.
